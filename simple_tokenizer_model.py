@@ -140,14 +140,23 @@ class SimpleTokenizerModel:
     
     @classmethod
     def load_model(cls, model_path):
-        """Load complete tokenizer model from file"""
+        import pickle
+    
         with open(model_path, 'rb') as f:
             model_data = pickle.load(f)
-        
+    
+        # Fallback if special tokens missing
+        special_tokens = model_data.get('special_tokens', {
+            '<PAD>': 0,
+            '<UNK>': 1,
+            '<SOS>': 2,
+            '<EOS>': 3
+        })
+    
         return cls(
             vocab=model_data['vocab'],
             dictionary=model_data['dictionary'],
-            special_tokens=model_data['special_tokens']
+            special_tokens=special_tokens
         )
     
     def get_vocab_size(self):
