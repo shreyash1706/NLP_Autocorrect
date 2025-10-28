@@ -13,6 +13,14 @@ sample_suggestions = ["apple", "banana", "grape", "orange", "mango"]
 # Send them to JS
 suggestions_json = json.dumps(sample_suggestions)
 
+
+#get the current text from html element
+
+#track last word and sentence both , 
+
+#using the text generate bk for last word if not in dictionary
+
+
 # Custom HTML + JS
 components.html(f"""
 <!DOCTYPE html>
