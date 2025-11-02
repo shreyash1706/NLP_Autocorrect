@@ -1,128 +1,79 @@
-import streamlit as st
-import random
 import json
+import random
+from testbktree import BKTree, CandidateGenerator, BKNode
+from test_tokenizer import FastWordPieceTokenizer
+from pathlib import Path
+import streamlit as st
 import streamlit.components.v1 as components
+from reranking import gru_rerank
+import onnxruntime as ort
+import pickle
+from scoring import get_final_candidates
+
+@st.cache_resource
+def load_resources():
+    with open("spell_checker_object.pkl", "rb") as f:
+        spell_checker = pickle.load(f)
+
+    with open("unigram_small.pkl", "rb") as f:
+        unigram = pickle.load(f)
+
+    with open("trigram_small.pkl", "rb") as f:
+        trigram = pickle.load(f)
+
+    # with open("wikitext2_tokenizer_wordpiece.pkl", "rb") as f:
+    #     tokenizer = pickle.load(f)
+    
+    return spell_checker, unigram, trigram
+
+
+
+# Load everything once
+spell_checker, unigram, trigram = load_resources()
 
 st.set_page_config(page_title="Context Aware Auto-Corrector", layout="centered")
-
 st.title("🪄 Context-Aware Auto-Corrector")
 
-# Placeholder suggestions (simulate model output)
-sample_suggestions = ["apple", "banana", "grape", "orange", "mango"]
+component_path = str(Path(__file__).parent / "autocorrect_component")
+autocorrect = components.declare_component("autocorrect", path=component_path)
 
-# Send them to JS
-suggestions_json = json.dumps(sample_suggestions)
+# Initialize persistent state
+if "suggestions" not in st.session_state:
+    st.session_state.suggestions = []
 
+# Call the component ONCE, with current suggestions
+result = autocorrect(suggestions=st.session_state.suggestions, key="autocorrect")
 
-#get the current text from html element
+if result is not None:
+    text = result.get("text", "") or ""
+    last_word = result.get("lastWord", "") or ""
 
-#track last word and sentence both , 
+    # Only recompute if user actually typed a new last_word
+    if last_word and (st.session_state.get("last_processed") != last_word):
+        st.session_state.last_processed = last_word
+        if last_word.lower() in spell_checker.dictionary:
+            st.session_state.suggestions = []
+        else:
+            candidates = get_final_candidates(
+                spell_checker,
+                last_word,
+                text,
+                unigram,
+                trigram,
+                max_candidates=25,
+                max_edit_distance=3,
+            )
 
-#using the text generate bk for last word if not in dictionary
+            # Optionally use GRU rerank
+            # reranked = gru_rerank(candidates, text, last_word, session, tokenizer, alpha=0.7, top_k=50)
+            # st.session_state.suggestions = [w for w, _ in reranked[:5]]
 
+            st.session_state.suggestions = [w for w, _ in candidates[:10]]
 
-# Custom HTML + JS
-components.html(f"""
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-textarea {{
-  width: 100%;
-  height: 200px;
-  font-size: 16px;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-  resize: none;
-}}
+        # Update component with new suggestions
+        st.rerun()
 
-#numSuggestions {{
-  margin-bottom: 10px;
-  padding: 5px 10px;
-  font-size: 15px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  display: block;
-}}
-.suggestions {{
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}}
-
-.suggestion {{
-  background-color: #f0f0f0;
-  border-radius: 5px;
-  padding: 5px 10px;
-  cursor: pointer;
-  transition: background 0.2s;
-}}
-
-.suggestion:hover {{
-  background-color: #e0e0e0;
-}}
-</style>
-</head>
-<body>
-
-<textarea id="textArea" placeholder="Type here..."></textarea>
-
-<label for="numSuggestions">Number of Suggestions:</label>
-  <select id="numSuggestions">
-    <option value="2">2</option>
-    <option value="3" selected>3</option>
-    <option value="4">4</option>
-    <option value="5">5</option>
-  </select>
-
-
-<div id="suggestions" class="suggestions"></div>
-
-<script>
-const suggestions = {suggestions_json};
-const numSelect = document.getElementById("numSuggestions");
-const textArea = document.getElementById("textArea");
-const suggestionsDiv = document.getElementById("suggestions");
-
-textArea.addEventListener("keydown", function(e) {{
-  if (e.key === " ") {{
-    // Delay to get updated value
-    setTimeout(() => {{
-      const text = textArea.value.trim();
-      const words = text.split(/\\s+/);
-      const lastWord = words[words.length - 1];
-
-      // Simulate: if last word is short, show suggestions
-      if (lastWord.length > 0 && lastWord.length < 5) {{
-        showSuggestions();
-      }} else {{
-        suggestionsDiv.innerHTML = "";
-      }}
-    }}, 50);
-  }}
-}});
-
-function showSuggestions() {{
-  suggestionsDiv.innerHTML = "";
-  const randomSubset = suggestions.sort(() => 0.5 - Math.random()).slice(0, numSelect.value);
-  randomSubset.forEach(s => {{
-    const btn = document.createElement("div");
-    btn.className = "suggestion";
-    btn.textContent = s;
-    btn.onclick = () => replaceLastWord(s);
-    suggestionsDiv.appendChild(btn);
-  }});
-}}
-
-function replaceLastWord(newWord) {{
-  const text = textArea.value.trimEnd();
-  const words = text.split(/\\s+/);
-  words[words.length - 1] = newWord;
-  textArea.value = words.join(" ") + " ";
-  suggestionsDiv.innerHTML = "";
-}}
-</script>
-</body>
-</html>
-""", height=350)
+    # For debugging
+    # st.write("Suggestions:", st.session_state.suggestions)
+    st.write("Text:", text)
+    st.write("Last Word:", last_word)

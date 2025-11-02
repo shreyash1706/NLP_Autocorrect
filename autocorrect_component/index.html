@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Autocorrect Component</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 12px; }
+    textarea {
+      width: 100%;
+      height: 200px;
+      font-size: 16px;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      resize: none;
+      box-sizing: border-box;
+    }
+    #numSuggestions {
+      margin: 10px 0 4px 0;
+      padding: 5px 10px;
+      font-size: 15px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      display: block;
+    }
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .suggestion {
+      background-color: #f0f0f0;
+      border-radius: 5px;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+      user-select: none;
+    }
+    .suggestion:hover { background-color: #e0e0e0; }
+  </style>
+</head>
+<body>
+  <textarea id="textArea" placeholder="Type here... Press space to see suggestions" autofocus></textarea>
+
+
+
+  <div id="suggestions" class="suggestions"></div>
+
+  <script>
+    // Minimal Streamlit messaging (no external libs)
+    const Comms = {
+      ready() { window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*"); },
+      setHeight(h) { window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h ?? document.documentElement.scrollHeight }, "*"); },
+      setValue(value) { window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setComponentValue", value }, "*"); }
+    };
+
+    let initialized = false;
+    let currentSuggestions = [];
+
+
+    function getLastWord(text) {
+      const trimmed = text.trim();
+      if (!trimmed) return "";
+      const parts = trimmed.split(/\s+/);
+      return parts[parts.length - 1] || "";
+    }
+
+    function renderSuggestionButtons(subset) {
+      const container = document.getElementById("suggestions");
+      container.innerHTML = "";
+      subset.forEach(s => {
+        const btn = document.createElement("div");
+        btn.className = "suggestion";
+        btn.textContent = s;
+        btn.onclick = () => replaceLastWord(s);
+        container.appendChild(btn);
+      });
+      Comms.setHeight();
+    }
+
+    function sendToPython(payload) {
+      // payload: { text, lastWord, shownSuggestions[] }
+      Comms.setValue(payload);
+    }
+
+    function onSpace() {
+    const ta = document.getElementById("textArea");
+    const text = ta.value;
+    const lastWord = getLastWord(text);
+
+    // Always send current state to Python
+    sendToPython({ text, lastWord });
+
+  // We'll render suggestions after Python sends updated ones
+}
+
+
+    function replaceLastWord(newWord) {
+      const ta = document.getElementById("textArea");
+      const words = ta.value.trimEnd().split(/\s+/);
+      if (words.length) {
+        words[words.length - 1] = newWord;
+        ta.value = words.join(" ") + " ";
+      }
+      const lastWord = getLastWord(ta.value);
+      document.getElementById("suggestions").innerHTML = "";
+      sendToPython({ text: ta.value, lastWord, shownSuggestions: [] });
+      Comms.setHeight();
+      ta.focus();
+    }
+
+    function attachEventsOnce() {
+      if (initialized) return;
+      initialized = true;
+
+      const ta = document.getElementById("textArea");
+      ta.addEventListener("keydown", (e) => {
+        if (e.key === " " || e.code === "Space") {
+          // Let textarea update, then compute
+          setTimeout(onSpace, 0);
+        }
+      });
+
+      document.getElementById("numSuggestions").addEventListener("change", () => {
+        document.getElementById("suggestions").innerHTML = "";
+        Comms.setHeight();
+      });
+    }
+
+    // Listen for args from Streamlit
+    window.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || !data.type) return;
+
+  if (data.type === "streamlit:render") {
+    const newSuggestions = Array.isArray(data.args?.suggestions) ? data.args.suggestions : [];
+    currentSuggestions = newSuggestions;
+
+    // Render suggestions in exact order
+    const container = document.getElementById("suggestions");
+    container.innerHTML = "";
+    newSuggestions.forEach((s) => {
+      const btn = document.createElement("div");
+      btn.className = "suggestion";
+      btn.textContent = s;
+      btn.onclick = () => replaceLastWord(s);
+      container.appendChild(btn);
+    });
+
+    attachEventsOnce();
+    Comms.setHeight();
+  }
+});
+
+
+    // Initial handshake
+    window.addEventListener("DOMContentLoaded", () => {
+      Comms.ready();
+      Comms.setHeight();
+      // Keep focus in the textarea so you can type immediately
+      const ta = document.getElementById("textArea");
+      ta.focus();
+    });
+  </script>
+</body>
+</html>
